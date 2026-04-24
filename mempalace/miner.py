@@ -19,6 +19,7 @@ from .palace import (
     NORMALIZE_VERSION,
     SKIP_DIRS,
     build_closet_lines,
+    safe_mine_session,
     file_already_mined,
     get_closets_collection,
     get_collection,
@@ -802,24 +803,28 @@ def mine(
     files_skipped = 0
     room_counts = defaultdict(int)
 
-    for i, filepath in enumerate(files, 1):
-        drawers, room = process_file(
-            filepath=filepath,
-            project_path=project_path,
-            collection=collection,
-            wing=wing,
-            rooms=rooms,
-            agent=agent,
-            dry_run=dry_run,
-            closets_col=closets_col,
-        )
-        if drawers == 0 and not dry_run:
-            files_skipped += 1
-        else:
-            total_drawers += drawers
-            room_counts[room] += 1
-            if not dry_run:
-                print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+    with safe_mine_session(palace_path, dry_run=dry_run) as session:
+        for i, filepath in enumerate(files, 1):
+            drawers, room = process_file(
+                filepath=filepath,
+                project_path=project_path,
+                collection=collection,
+                wing=wing,
+                rooms=rooms,
+                agent=agent,
+                dry_run=dry_run,
+                closets_col=closets_col,
+            )
+            if drawers == 0 and not dry_run:
+                files_skipped += 1
+            else:
+                total_drawers += drawers
+                room_counts[room] += 1
+                if not dry_run:
+                    print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+            if session.interrupted:
+                print(f"\n  Stopped gracefully after {i}/{len(files)} files.")
+                break
 
     print(f"\n{'=' * 55}")
     print("  Done.")
