@@ -1,6 +1,5 @@
 """Tests for palace.py lifecycle helpers: close_palace and safe_mine_session."""
 
-import os
 import signal
 from unittest.mock import patch
 
@@ -20,7 +19,9 @@ def test_safe_mine_session_sets_interrupted_on_sigint():
     from mempalace.palace import safe_mine_session
 
     with safe_mine_session("/tmp/fake-palace", dry_run=True) as session:
-        os.kill(os.getpid(), signal.SIGINT)
+        # Invoke the installed handler directly — os.kill(SIGINT) kills the
+        # whole process group on Windows, making the test runner exit.
+        signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
         assert session.interrupted
 
 
@@ -61,8 +62,9 @@ def test_safe_mine_session_double_sigint_prints_warning(capsys):
     from mempalace.palace import safe_mine_session
 
     with safe_mine_session("/tmp/fake-palace", dry_run=True) as session:
-        os.kill(os.getpid(), signal.SIGINT)
-        os.kill(os.getpid(), signal.SIGINT)
+        handler = signal.getsignal(signal.SIGINT)
+        handler(signal.SIGINT, None)
+        handler(signal.SIGINT, None)
         assert session.interrupted
 
     captured = capsys.readouterr()

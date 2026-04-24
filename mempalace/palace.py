@@ -103,6 +103,7 @@ class safe_mine_session:
 
     def __enter__(self):
         import signal
+
         self._prev_handler = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, self._handle_sigint)
         return self
@@ -116,11 +117,13 @@ class safe_mine_session:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         import signal
+
         if not self.dry_run:
             try:
                 close_palace(self.palace_path)
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning("Failed to close palace cleanly: %s", e)
         signal.signal(signal.SIGINT, self._prev_handler)
         return False
