@@ -28,7 +28,7 @@ def test_safe_mine_session_restores_signal_handler():
     from mempalace.palace import safe_mine_session
 
     original = signal.getsignal(signal.SIGINT)
-    with safe_mine_session("/tmp/fake-palace", dry_run=True) as session:
+    with safe_mine_session("/tmp/fake-palace", dry_run=True):
         inside = signal.getsignal(signal.SIGINT)
         assert inside != original
 
