@@ -337,3 +337,57 @@ class TestRegenerateClosets:
         for cid in ids:
             assert "/" not in cid
             assert "mydoc.md" in cid
+
+    def test_regen_paginates_when_total_exceeds_batch_size(self, tmp_path):
+        """drawers_col.get() is called in multiple batches when total > 5000."""
+        from unittest.mock import MagicMock, patch
+
+        palace = str(tmp_path / "palace")
+        source = "/src/bigfile.md"
+        total = 6000
+
+        get_calls = []
+
+        def _fake_get(limit=None, offset=0, include=None, **kw):
+            get_calls.append(offset)
+            n = min(limit, max(0, total - offset))
+            return {
+                "ids": [f"d_{offset + i}" for i in range(n)],
+                "documents": [f"doc {offset + i}" for i in range(n)],
+                "metadatas": [
+                    {"source_file": source, "wing": "w", "room": "r", "entities": ""}
+                    for _ in range(n)
+                ],
+            }
+
+        fake_drawers = MagicMock()
+        fake_drawers.count.return_value = total
+        fake_drawers.get.side_effect = _fake_get
+
+        fake_closets = MagicMock()
+        fake_closets.get.return_value = {"ids": [], "documents": [], "metadatas": []}
+
+        cfg = LLMConfig(endpoint="http://local/v1", model="m")
+
+        def _fake_urlopen(req, timeout=None):
+            return _FakeResp(
+                {
+                    "choices": [
+                        {"message": {"content": '{"topics":["t1"],"quotes":[],"summary":""}'}}
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                }
+            )
+
+        with (
+            patch("mempalace.closet_llm.get_collection", return_value=fake_drawers),
+            patch("mempalace.closet_llm.get_closets_collection", return_value=fake_closets),
+            patch("urllib.request.urlopen", side_effect=_fake_urlopen),
+        ):
+            result = regenerate_closets(palace, cfg=cfg)
+
+        assert result["processed"] == 1
+        # Pagination: first call at offset=0, second at offset=5000
+        assert len(get_calls) >= 2
+        assert get_calls[0] == 0
+        assert get_calls[1] == 5000

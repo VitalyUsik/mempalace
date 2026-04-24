@@ -15,6 +15,7 @@ from mempalace.backends import (
 from mempalace.backends.chroma import (
     ChromaBackend,
     ChromaCollection,
+    _close_client,
     _fix_blob_seq_ids,
     quarantine_stale_hnsw,
 )
@@ -443,3 +444,91 @@ def test_quarantine_stale_hnsw_skips_already_quarantined(tmp_path):
     moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
     assert moved == []
     assert drift.exists()
+
+
+# ── _close_client ─────────────────────────────────────────────────────────
+
+
+def test_close_client_calls_close():
+    closed = []
+
+    class _FakeChromaClient:
+        def close(self):
+            closed.append(True)
+
+    _close_client(_FakeChromaClient())
+    assert closed == [True]
+
+
+def test_close_client_handles_none():
+    _close_client(None)  # must not raise
+
+
+def test_close_client_swallows_exception():
+    class _BrokenClient:
+        def close(self):
+            raise RuntimeError("simulated")
+
+    _close_client(_BrokenClient())  # must not raise
+
+
+# ── _cache_key ────────────────────────────────────────────────────────────
+
+
+def test_cache_key_strips_trailing_slash(tmp_path):
+    key_with = ChromaBackend._cache_key(str(tmp_path) + "/")
+    key_without = ChromaBackend._cache_key(str(tmp_path))
+    assert key_with == key_without
+
+
+def test_cache_key_resolves_to_absolute(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    relative = "."
+    key = ChromaBackend._cache_key(relative)
+    assert key == str(tmp_path.resolve())
+
+
+# ── close_palace / close with _close_client ───────────────────────────────
+
+
+def test_close_palace_calls_close_on_cached_client(tmp_path):
+    backend = ChromaBackend()
+    palace_path = str(tmp_path / "palace")
+    key = backend._cache_key(palace_path)
+
+    closed = []
+
+    class _FakeChromaClient:
+        def close(self):
+            closed.append(key)
+
+    backend._clients[key] = _FakeChromaClient()
+    backend._freshness[key] = (0, 0.0)
+
+    backend.close_palace(palace_path)
+
+    assert closed == [key]
+    assert key not in backend._clients
+    assert key not in backend._freshness
+
+
+def test_close_calls_close_on_all_cached_clients():
+    backend = ChromaBackend()
+
+    closed = []
+
+    class _FakeChromaClient:
+        def __init__(self, name):
+            self._name = name
+
+        def close(self):
+            closed.append(self._name)
+
+    backend._clients["/path/a"] = _FakeChromaClient("a")
+    backend._clients["/path/b"] = _FakeChromaClient("b")
+
+    backend.close()
+
+    assert set(closed) == {"a", "b"}
+    assert backend._clients == {}
+    assert backend._closed is True
