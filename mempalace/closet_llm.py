@@ -221,17 +221,25 @@ def regenerate_closets(
         print("No drawers in palace.")
         return {"processed": 0}
 
-    all_data = drawers_col.get(limit=total, include=["documents", "metadatas"])
-    by_source = {}
-    for doc_id, doc, meta in zip(all_data["ids"], all_data["documents"], all_data["metadatas"]):
-        source = meta.get("source_file", "unknown")
-        w = meta.get("wing", "")
-        if wing and w != wing:
-            continue
-        if source not in by_source:
-            by_source[source] = {"drawer_ids": [], "content": [], "meta": meta}
-        by_source[source]["drawer_ids"].append(doc_id)
-        by_source[source]["content"].append(doc)
+    by_source: dict = {}
+    batch_size = 5000
+    offset = 0
+    while offset < total:
+        batch = drawers_col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        ids = batch["ids"]
+        if not ids:
+            break
+        for doc_id, doc, meta in zip(ids, batch["documents"], batch["metadatas"]):
+            meta = meta or {}
+            source = meta.get("source_file", "unknown")
+            w = meta.get("wing", "")
+            if wing and w != wing:
+                continue
+            if source not in by_source:
+                by_source[source] = {"drawer_ids": [], "content": [], "meta": meta}
+            by_source[source]["drawer_ids"].append(doc_id)
+            by_source[source]["content"].append(doc)
+        offset += len(ids)
 
     sources = list(by_source.keys())
     if sample > 0:

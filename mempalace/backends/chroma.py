@@ -120,8 +120,7 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> li
             os.rename(seg_dir, target)
             moved.append(target)
             logger.warning(
-                "Quarantined stale HNSW segment %s "
-                "(sqlite %.0fs newer than HNSW); renamed to %s",
+                "Quarantined stale HNSW segment %s (sqlite %.0fs newer than HNSW); renamed to %s",
                 seg_dir,
                 sqlite_mtime - hnsw_mtime,
                 target,
@@ -175,6 +174,20 @@ def _as_list(v: Any) -> list:
     if isinstance(v, list):
         return v
     return [v]
+
+
+def _close_client(client) -> None:
+    """Call ``PersistentClient.close()`` if available, swallow otherwise.
+
+    chromadb 1.5.x exposes ``Client.close()`` to release rust-side SQLite
+    file locks; older versions relied on GC. Try/except keeps forward-compat.
+    """
+    if client is None:
+        return
+    try:
+        client.close()
+    except Exception:
+        logger.debug("client.close() unavailable or failed", exc_info=True)
 
 
 class ChromaCollection(BaseCollection):
@@ -420,6 +433,18 @@ class ChromaBackend(BaseBackend):
         except OSError:
             return (0, 0.0)
 
+    @staticmethod
+    def _cache_key(path: str) -> str:
+        """Normalize a palace path for consistent cache-dict key lookup.
+
+        Resolves relative paths, symlinks, and trailing slashes so that
+        ``get_collection("./palace")`` and ``close_palace("/abs/palace")``
+        always hit the same cache entry.
+        """
+        from pathlib import Path
+
+        return str(Path(path).resolve())
+
     def _client(self, palace_path: str):
         """Return a cached ``PersistentClient``, rebuilding on inode/mtime change.
 
@@ -442,6 +467,7 @@ class ChromaBackend(BaseBackend):
 
             raise BackendClosedError("ChromaBackend has been closed")
 
+        palace_path = self._cache_key(palace_path)
         cached = self._clients.get(palace_path)
         cached_inode, cached_mtime = self._freshness.get(palace_path, (0, 0.0))
         current_inode, current_mtime = self._db_stat(palace_path)
@@ -542,14 +568,23 @@ class ChromaBackend(BaseBackend):
         return ChromaCollection(collection)
 
     def close_palace(self, palace) -> None:
-        """Drop cached handles for ``palace``. Accepts ``PalaceRef`` or legacy path str."""
+        """Drop cached handles for ``palace`` and release its SQLite file lock.
+
+        Accepts ``PalaceRef`` or legacy path str. chromadb's rust-side file
+        lock is held until ``PersistentClient.close()`` is called, so plain
+        dict eviction would leave the palace path unreopenable and
+        unremovable in the same process.
+        """
         path = palace.local_path if isinstance(palace, PalaceRef) else palace
         if path is None:
             return
-        self._clients.pop(path, None)
+        path = self._cache_key(path)
+        _close_client(self._clients.pop(path, None))
         self._freshness.pop(path, None)
 
     def close(self) -> None:
+        for client in self._clients.values():
+            _close_client(client)
         self._clients.clear()
         self._freshness.clear()
         self._closed = True
