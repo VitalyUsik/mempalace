@@ -763,6 +763,7 @@ def test_close_calls_close_on_all_cached_clients():
     assert backend._clients == {}
     assert backend._closed is True
 
+
 # ── make_client cold-start gate ──────────────────────────────────────────
 
 
