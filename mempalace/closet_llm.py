@@ -40,6 +40,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime
@@ -101,6 +102,14 @@ class LLMConfig:
         self.endpoint = (endpoint or os.environ.get("LLM_ENDPOINT", "")).rstrip("/")
         self.key = key or os.environ.get("LLM_KEY", "")
         self.model = model or os.environ.get("LLM_MODEL", "")
+        if self.endpoint:
+            # Privacy-by-architecture: reject file:// and other non-HTTP schemes
+            # so a misconfigured endpoint cannot exfiltrate local files.
+            scheme = urllib.parse.urlparse(self.endpoint).scheme.lower()
+            if scheme not in ("http", "https"):
+                raise ValueError(
+                    f"LLM_ENDPOINT must use http:// or https:// (got scheme {scheme!r})"
+                )
 
     def missing(self) -> list:
         missing = []
@@ -221,6 +230,9 @@ def regenerate_closets(
         print("No drawers in palace.")
         return {"processed": 0}
 
+    # Paginate the fetch — a single get(limit=total, ...) blows through
+    # SQLite's SQLITE_MAX_VARIABLE_NUMBER (32766) on large palaces and
+    # crashes inside chromadb (see #802, #850, #1073).
     by_source: dict = {}
     batch_size = 5000
     offset = 0
