@@ -84,6 +84,24 @@ class TestSearchMemories:
         assert "error" in result
         assert "query failed" in result["error"]
 
+    def test_search_memories_vector_path_uses_explicit_collection_name(self):
+        mock_col = MagicMock()
+        mock_col.query.return_value = {
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+            "ids": [[]],
+        }
+
+        with patch("mempalace.searcher.get_collection", return_value=mock_col) as get_collection:
+            search_memories("test", "/fake/path", collection_name="custom_drawers")
+
+        get_collection.assert_called_once_with(
+            "/fake/path",
+            collection_name="custom_drawers",
+            create=False,
+        )
+
     def test_search_memories_filters_in_result(self, palace_path, seeded_collection):
         result = search_memories("test", palace_path, wing="project", room="backend")
         assert result["filters"]["wing"] == "project"
@@ -102,7 +120,7 @@ class TestSearchMemories:
             "ids": [["d1", "d2"]],
         }
 
-        def mock_get_collection(path, create=False):
+        def mock_get_collection(path, collection_name=None, create=False):
             # First call: drawers. Second call: closets — raise so hybrid
             # degrades to pure drawer search (the catch block covers it).
             if not hasattr(mock_get_collection, "_called"):
@@ -367,3 +385,17 @@ class TestSearchCLI:
         assert "[2]" in captured.out
         # Second result renders with fallback '?' values instead of crashing
         assert "second doc" in captured.out
+
+    def test_search_handles_none_document_without_crash(self, capsys):
+        mock_col = MagicMock()
+        mock_col.metadata = {"hnsw:space": "cosine"}
+        mock_col.query.return_value = {
+            "documents": [["first doc", None]],
+            "metadatas": [[{"source_file": "a.md", "wing": "w", "room": "r"}, None]],
+            "distances": [[0.1, 0.2]],
+        }
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
+            search("anything", "/fake/path")
+        captured = capsys.readouterr()
+        assert "[1]" in captured.out
+        assert "[2]" in captured.out
