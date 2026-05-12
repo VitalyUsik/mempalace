@@ -809,6 +809,20 @@ def cmd_mcp(args):
         print(f"  {base_server_cmd} --palace /path/to/palace")
 
 
+def cmd_dedup(args):
+    """Remove near-duplicate drawers from the palace."""
+    from .dedup import dedup_palace
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    dedup_palace(
+        palace_path=palace_path,
+        threshold=args.threshold,
+        dry_run=args.dry_run,
+        source_pattern=args.source or None,
+        wing=args.wing or None,
+    )
+
+
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
     from .backends.chroma import ChromaBackend
@@ -1122,6 +1136,20 @@ def main():
     p_search.add_argument("--room", default=None, help="Limit to one room")
     p_search.add_argument("--results", type=int, default=5, help="Number of results")
 
+    # dedup
+    p_dedup = sub.add_parser("dedup", help="Remove near-duplicate drawers")
+    p_dedup.add_argument("--wing", default=None, help="Limit to one wing")
+    p_dedup.add_argument("--source", default=None, help="Filter by source file pattern")
+    p_dedup.add_argument(
+        "--threshold",
+        type=float,
+        default=0.97,
+        help="Similarity threshold for duplicates (default: 0.97)",
+    )
+    p_dedup.add_argument(
+        "--dry-run", action="store_true", help="Preview without deleting"
+    )
+
     # compress
     p_compress = sub.add_parser(
         "compress", help="Compress drawers using AAAK Dialect (~30x reduction)"
@@ -1304,6 +1332,7 @@ def main():
         "search": cmd_search,
         "sweep": cmd_sweep,
         "mcp": cmd_mcp,
+        "dedup": cmd_dedup,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
